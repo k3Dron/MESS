@@ -3,6 +3,7 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
@@ -40,9 +41,9 @@ class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyA24QOygi4VMdpYUm450qMhxnSe_nR5jbA',
-    appId: '1:306531011914:web:f49c40c5e4cbb7768c05b3',
+  static FirebaseOptions get web => FirebaseOptions(
+    apiKey: dotenv.get('FIREBASE_WEB_API_KEY'),
+    appId: dotenv.get('FIREBASE_WEB_APP_ID'),
     messagingSenderId: '306531011914',
     projectId: 'mezz-3c847',
     authDomain: 'mezz-3c847.firebaseapp.com',
@@ -50,39 +51,24 @@ class DefaultFirebaseOptions {
     measurementId: 'G-SKX127W12M',
   );
 
-  static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBKEx9_YgQr2MdkBngChNgt3SDW0lGzJlk',
-    appId: '1:306531011914:android:fb35d4cbf73e28968c05b3',
+  static FirebaseOptions get android => FirebaseOptions(
+    apiKey: dotenv.get('FIREBASE_ANDROID_API_KEY'),
+    appId: dotenv.get('FIREBASE_ANDROID_APP_ID'),
     messagingSenderId: '306531011914',
     projectId: 'mezz-3c847',
     storageBucket: 'mezz-3c847.firebasestorage.app',
   );
 
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyDtcTTsxE60f_pwlzxSEBq6cAG4nsc0Ti0',
-    appId: '1:306531011914:ios:c36c797838c95b8b8c05b3',
+  static FirebaseOptions get ios => FirebaseOptions(
+    apiKey: dotenv.get('FIREBASE_IOS_API_KEY'),
+    appId: dotenv.get('FIREBASE_IOS_APP_ID'),
     messagingSenderId: '306531011914',
     projectId: 'mezz-3c847',
     storageBucket: 'mezz-3c847.firebasestorage.app',
     iosBundleId: 'com.mezz.mezz',
   );
 
-  static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyDtcTTsxE60f_pwlzxSEBq6cAG4nsc0Ti0',
-    appId: '1:306531011914:ios:c36c797838c95b8b8c05b3',
-    messagingSenderId: '306531011914',
-    projectId: 'mezz-3c847',
-    storageBucket: 'mezz-3c847.firebasestorage.app',
-    iosBundleId: 'com.mezz.mezz',
-  );
+  static FirebaseOptions get macos => ios;
 
-  static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyA24QOygi4VMdpYUm450qMhxnSe_nR5jbA',
-    appId: '1:306531011914:web:bcdae96242f068298c05b3',
-    messagingSenderId: '306531011914',
-    projectId: 'mezz-3c847',
-    authDomain: 'mezz-3c847.firebaseapp.com',
-    storageBucket: 'mezz-3c847.firebasestorage.app',
-    measurementId: 'G-LW9YW61PXZ',
-  );
+  static FirebaseOptions get windows => web;
 }
