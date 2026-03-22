@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class CloudinaryService {
-  static String get cloudName => dotenv.get('CLOUDINARY_CLOUD_NAME');
-  static String get uploadPreset => dotenv.get('CLOUDINARY_UPLOAD_PRESET');
+  static const String cloudName = 'dfkirrpkz';
+  // Create an unsigned upload preset in Cloudinary Dashboard:
+  // Settings → Upload → Upload Presets → Add Unsigned Preset
+  // Then paste the preset name below.
+  static const String uploadPreset = 'mezz_unsigned';
 
   static Future<String?> uploadImage(File imageFile) async {
     try {
