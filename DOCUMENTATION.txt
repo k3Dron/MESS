@@ -1,0 +1,1057 @@
+================================================================================
+                        MEZZ - CODEBASE DOCUMENTATION
+                     Hostel Mess Management Application
+                          Last updated: March 3, 2026
+================================================================================
+
+
+TABLE OF CONTENTS
+─────────────────
+  1.  Overview
+  2.  Tech Stack
+  3.  Project Structure
+  4.  Architecture Diagram
+  5.  Database Schema (Firestore)
+  6.  Data Models
+  7.  Services Layer
+  8.  Screens & UI
+  9.  Widgets
+  10. Constants & Theming
+  11. Feature: Meal Scheduling & Locking
+  12. Feature: Billing & Plans
+  13. Feature: Semester Fee Flow
+  14. Feature: Receipts & PDF Generation
+  15. Feature: Notifications
+  16. Feature: Requests (Unlock & Parcel)
+  17. Feature: Comments Feed
+  18. Authentication Flow
+  19. App Startup Flow
+  20. Key Business Rules
+  21. How to Modify Common Things
+
+
+================================================================================
+1. OVERVIEW
+================================================================================
+
+Mezz is a dual-portal Flutter application for managing hostel mess operations.
+It serves two user types:
+
+  • STUDENTS  — Mark daily meals (Veg/Non-Veg/Absent), view expenditure,
+                request meal changes or parcels, select billing plans, view
+                receipts, and participate in a community feed.
+
+  • VENDORS   — View daily headcounts, manage student billing, issue semester
+                fees, handle unlock/parcel requests, clear bills with
+                receipt generation, and configure settings.
+
+Students link to vendors via a 6-digit vendor code. All data is stored in
+Cloud Firestore. The UI follows a soft neumorphism design style with the
+primary brand color #6C63FF (purple/indigo).
+
+
+================================================================================
+2. TECH STACK
+================================================================================
+
+  Framework:      Flutter (Dart SDK ^3.9.2)
+  Backend:        Firebase (Firestore + Firebase Auth)
+  Authentication: Firebase Authentication (email/password)
+  Database:       Cloud Firestore (NoSQL document-based)
+  Image Upload:   Cloudinary (unsigned upload preset)
+  PDF Generation: pdf + printing packages (on-demand, client-side)
+  Fonts:          Google Fonts (Poppins for headings, Manrope for body)
+  State Mgmt:     setState + StreamBuilder (no external state management)
+
+  Key Dependencies (pubspec.yaml):
+  ─────────────────────────────────
+  firebase_core, firebase_auth, cloud_firestore
+  google_fonts, intl, http, image_picker, provider
+  cached_network_image, pdf, printing, path_provider
+  flutter_launcher_icons (dev dependency)
+
+
+================================================================================
+3. PROJECT STRUCTURE
+================================================================================
+
+  lib/
+  ├── main.dart                          # App entry, routing, AuthGate
+  ├── firebase_options.dart              # Auto-generated Firebase config
+  │
+  ├── constants/
+  │   ├── constants.dart                 # Colors, radii, shadows, meal
+  │   │                                  #   schedule, prices, billing plans
+  │   └── theme.dart                     # Material theme definition
+  │
+  ├── models/
+  │   ├── student_model.dart             # Student document model
+  │   ├── vendor_model.dart              # Vendor document model
+  │   ├── meal_day_model.dart            # Single day's meal choices [B,L,D]
+  │   ├── month_billing_model.dart       # Monthly expenditure tracking
+  │   ├── receipt_model.dart             # Bill receipt with unique code
+  │   └── comment_model.dart             # Mess feed comment
+  │
+  ├── services/
+  │   ├── auth_service.dart              # Sign up, sign in, role detection
+  │   ├── firestore_service.dart         # All Firestore CRUD (30+ methods)
+  │   ├── meal_logic.dart                # Meal locking, costing, scheduling
+  │   ├── billing_logic.dart             # Plan allowances, overspend, buffer
+  │   ├── cloudinary_service.dart        # Profile picture upload
+  │   └── receipt_pdf_service.dart       # On-demand PDF receipt generation
+  │
+  ├── screens/
+  │   ├── splash_screen.dart             # Animated splash with MEZZ logo
+  │   ├── auth/
+  │   │   ├── login_screen.dart          # Email/password login
+  │   │   └── signup_screen.dart         # Student or vendor registration
+  │   ├── student/
+  │   │   ├── student_shell.dart         # Bottom nav wrapper (4 tabs)
+  │   │   ├── student_dashboard.dart     # Today's meals, stats, comments
+  │   │   ├── student_calendar.dart      # Monthly meal calendar view
+  │   │   ├── student_notifications.dart # Notification feed
+  │   │   └── student_profile.dart       # Profile, receipts, sem fee card
+  │   └── vendor/
+  │       ├── vendor_shell.dart          # Bottom nav wrapper (4 tabs)
+  │       ├── vendor_dashboard.dart      # Headcounts, daily stats
+  │       ├── vendor_billing.dart        # Student bills, sem fees, clearing
+  │       ├── vendor_notifications.dart  # Requests (unlock/parcel) actions
+  │       ├── vendor_menu_editor.dart    # Menu configuration
+  │       └── vendor_settings.dart       # Account settings, vendor code
+  │
+  └── widgets/
+      ├── meal_card_widget.dart          # Meal card (compact + full modes)
+      ├── neumorphic_card.dart           # Reusable neumorphic card wrapper
+      ├── pill_button.dart               # Rounded pill-shaped button
+      └── floating_bottom_nav.dart       # Floating bottom navigation bar
+  
+  assets/
+  └── images/
+      └── mezz_logo.png                 # App logo (M from cutlery)
+
+
+================================================================================
+4. ARCHITECTURE DIAGRAM
+================================================================================
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                          FLUTTER APP                                │
+  │                                                                     │
+  │  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐      │
+  │  │  Screens  │───>│  Widgets │    │  Models  │    │Constants │      │
+  │  │ (UI/UX)  │    │(Reusable)│    │ (Data)   │    │(Config)  │      │
+  │  └────┬─────┘    └──────────┘    └────▲─────┘    └──────────┘      │
+  │       │                               │                             │
+  │       ▼                               │                             │
+  │  ┌──────────────────────────────────────┐                           │
+  │  │           SERVICES LAYER             │                           │
+  │  │                                      │                           │
+  │  │  auth_service ──── Firebase Auth     │                           │
+  │  │  firestore_service ── Firestore      │                           │
+  │  │  meal_logic ──── Pure Dart logic     │                           │
+  │  │  billing_logic ── Pure Dart logic    │                           │
+  │  │  cloudinary_service ── HTTP API      │                           │
+  │  │  receipt_pdf_service ── pdf package  │                           │
+  │  └──────────────────┬───────────────────┘                           │
+  └─────────────────────┼───────────────────────────────────────────────┘
+                        │
+                        ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                      FIREBASE BACKEND                               │
+  │                                                                     │
+  │  ┌─────────────────┐    ┌──────────────────────────────────────┐    │
+  │  │  Firebase Auth   │    │  Cloud Firestore                     │    │
+  │  │  (email/password)│    │                                      │    │
+  │  │                  │    │  students/{email}                    │    │
+  │  │  Users:          │    │    └── vendor_data/{code}/           │    │
+  │  │  - Students      │    │         ├── meals/{month}/days/{d}  │    │
+  │  │  - Vendors       │    │         ├── billing/{month}         │    │
+  │  └─────────────────┘    │         ├── receipts/{id}           │    │
+  │                          │         └── notifications/{id}      │    │
+  │  ┌─────────────────┐    │                                      │    │
+  │  │  Cloudinary CDN  │    │  vendors/{email}                    │    │
+  │  │  (profile pics)  │    │    ├── active_requests/{id}         │    │
+  │  └─────────────────┘    │    ├── receipts/{id}                │    │
+  │                          │    └── pending_bills/{id}           │    │
+  │                          │                                      │    │
+  │                          │  vendor_feeds/{code}/comments/{id}  │    │
+  │                          └──────────────────────────────────────┘    │
+  └─────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+5. DATABASE SCHEMA (FIRESTORE)
+================================================================================
+
+All Firestore document IDs use email addresses (for students/vendors) or
+auto-generated IDs (for subcollection items).
+
+─── COLLECTION: students ──────────────────────────────────────────────
+
+  Document ID: {student_email}
+  Fields:
+  ┌──────────────────┬──────────┬──────────────────────────────────┐
+  │ Field            │ Type     │ Description                      │
+  ├──────────────────┼──────────┼──────────────────────────────────┤
+  │ email            │ string   │ Student's email address           │
+  │ name             │ string   │ Full name                        │
+  │ hostel_no        │ string   │ Hostel number (e.g., "5")        │
+  │ profile_pic_url  │ string   │ Cloudinary URL for profile pic   │
+  │ vendor_code      │ string   │ 6-digit code linking to vendor   │
+  │ billing_status   │ string   │ 'active', 'paid', or 'pending'    │
+  │ selected_plan    │ int      │ Plan ID: 1, 2, or 3             │
+  │ role             │ string   │ Always 'student'                 │
+  │ created_at       │ timestamp│ Account creation date            │
+  └──────────────────┴──────────┴──────────────────────────────────┘
+
+  Subcollection: students/{email}/vendor_data/{vendor_code}/
+
+    Sub-subcollection: meals/{month}/days/{day}
+    ┌──────────┬──────────┬────────────────────────────────────────┐
+    │ Field    │ Type     │ Description                            │
+    ├──────────┼──────────┼────────────────────────────────────────┤
+    │ day      │ int      │ Day of month (1-31)                    │
+    │ month    │ int      │ Month (1-12)                           │
+    │ year     │ int      │ Year (e.g., 2026)                      │
+    │ meals    │ array    │ [breakfast, lunch, dinner]              │
+    │          │          │ Each: 0=Absent, 1=Veg, 2=Non-Veg       │
+    └──────────┴──────────┴────────────────────────────────────────┘
+
+    Sub-subcollection: billing/{month}
+    ┌──────────────┬──────────┬────────────────────────────────────┐
+    │ Field        │ Type     │ Description                        │
+    ├──────────────┼──────────┼────────────────────────────────────┤
+    │ month        │ int      │ Month number                       │
+    │ monthly_exp  │ double   │ Total expenditure for the month    │
+    │ total_year_exp│ double  │ Running yearly total               │
+    │ paid_status  │ string   │ 'paid', 'pending', or 'partial'    │
+    └──────────────┴──────────┴────────────────────────────────────┘
+
+    Sub-subcollection: receipts/{receipt_id}
+    ┌────────────────┬──────────┬──────────────────────────────────┐
+    │ Field          │ Type     │ Description                      │
+    ├────────────────┼──────────┼──────────────────────────────────┤
+    │ id             │ string   │ Auto-generated doc ID            │
+    │ receipt_code   │ string   │ Unique 8-char alphanumeric code  │
+    │ expenditure    │ double   │ Total month expenditure           │
+    │ plan_deduction │ double   │ Deducted from plan allowance     │
+    │ final_cost     │ double   │ Amount owed after deductions     │
+    │ buffer_used    │ double   │ Security deposit buffer used     │
+    │ date           │ string   │ ISO 8601 date string             │
+    │ student_email  │ string   │ Student's email                  │
+    │ vendor_code    │ string   │ Vendor's 6-digit code            │
+    │ month          │ int      │ Billing month                    │
+    └────────────────┴──────────┴──────────────────────────────────┘
+
+    Sub-subcollection: notifications/{notif_id}
+    ┌──────────────┬──────────┬────────────────────────────────────┐
+    │ Field        │ Type     │ Description                        │
+    ├──────────────┼──────────┼────────────────────────────────────┤
+    │ message      │ string   │ Notification text                  │
+    │ timestamp    │ timestamp│ When notification was created      │
+    │ read         │ bool     │ Whether student has read it        │
+    └──────────────┴──────────┴────────────────────────────────────┘
+
+
+─── COLLECTION: vendors ───────────────────────────────────────────────
+
+  Document ID: {vendor_email}
+  Fields:
+  ┌──────────────┬──────────┬──────────────────────────────────────┐
+  │ Field        │ Type     │ Description                          │
+  ├──────────────┼──────────┼──────────────────────────────────────┤
+  │ email        │ string   │ Vendor's email address               │
+  │ name         │ string   │ Vendor name / mess name              │
+  │ unique_code  │ string   │ 6-digit code students use to link    │
+  │ menu_config  │ map      │ Custom menu configuration            │
+  │ role         │ string   │ Always 'vendor'                      │
+  │ created_at   │ timestamp│ Account creation date                │
+  └──────────────┴──────────┴──────────────────────────────────────┘
+
+  Subcollection: vendors/{email}/active_requests/{request_id}
+  ┌──────────────────┬──────────┬──────────────────────────────────┐
+  │ Field            │ Type     │ Description                      │
+  ├──────────────────┼──────────┼──────────────────────────────────┤
+  │ student_email    │ string   │ Requesting student's email       │
+  │ type             │ string   │ 'unlock' or 'parcel'             │
+  │ meal_label       │ string   │ 'Breakfast', 'Lunch', 'Dinner'   │
+  │ reason           │ string   │ Student's reason text            │
+  │ recipient_name   │ string   │ Name (for parcels)               │
+  │ status           │ string   │ 'pending', 'approved', 'rejected'│
+  │ timestamp        │ timestamp│ When request was submitted       │
+  └──────────────────┴──────────┴──────────────────────────────────┘
+
+  Subcollection: vendors/{email}/receipts/{receipt_id}
+    (Same schema as student receipts — duplicated for vendor access)
+
+  Subcollection: vendors/{email}/pending_bills/{bill_id}
+  ┌──────────────────┬──────────┬──────────────────────────────────┐
+  │ Field            │ Type     │ Description                      │
+  ├──────────────────┼──────────┼──────────────────────────────────┤
+  │ student_email    │ string   │ Student this bill is for         │
+  │ student_name     │ string   │ Student's name                   │
+  │ month            │ int      │ Month (0 for semester fees)       │
+  │ amount           │ double   │ Outstanding amount               │
+  │ type             │ string   │ 'monthly' or 'semester_fee'      │
+  │ updated_at       │ timestamp│ Last update timestamp            │
+  └──────────────────┴──────────┴──────────────────────────────────┘
+
+
+─── COLLECTION: vendor_feeds ──────────────────────────────────────────
+
+  Document ID: {vendor_code}
+
+  Subcollection: vendor_feeds/{code}/comments/{comment_id}
+  ┌──────────────────┬──────────┬──────────────────────────────────┐
+  │ Field            │ Type     │ Description                      │
+  ├──────────────────┼──────────┼──────────────────────────────────┤
+  │ author_email     │ string   │ Who posted the comment           │
+  │ author_name      │ string   │ Display name                     │
+  │ text             │ string   │ Comment text                     │
+  │ image_url        │ string   │ Optional image attachment        │
+  │ likes            │ int      │ Like count                       │
+  │ timestamp        │ timestamp│ When comment was posted          │
+  └──────────────────┴──────────┴──────────────────────────────────┘
+
+
+================================================================================
+6. DATA MODELS
+================================================================================
+
+All models are in lib/models/. Each has:
+  - Constructor with named parameters
+  - factory fromMap() — converts Firestore doc to model
+  - toMap() — converts model to Firestore-compatible map
+  - copyWith() — immutable update pattern
+
+  StudentModel    — email, name, hostelNo, profilePicUrl, vendorCode,
+                    billingStatus ('active'|'paid'|'pending'), selectedPlan (1-3)
+
+  VendorModel     — email, name, uniqueCode (6-digit), menuConfig (map)
+
+  MealDayModel    — day, month, year, meals (List<int> of 3 elements)
+                    Each meal: 0=Absent, 1=Veg, 2=Non-Veg
+
+  MonthBillingModel — month, monthlyExp (total ₹), totalYearExp,
+                      paidStatus ('paid'|'pending'|'partial')
+
+  ReceiptModel    — id, receiptCode (8-char), expenditure, planDeduction,
+                    finalCost, bufferUsed, date, studentEmail, vendorCode, month
+                    Static method: generateReceiptCode() — cryptographic random
+
+  CommentModel    — id, authorEmail, authorName, text, imageUrl, likes, timestamp
+
+
+================================================================================
+7. SERVICES LAYER
+================================================================================
+
+All services are in lib/services/. They are stateless utility classes.
+
+── auth_service.dart ──────────────────────────────────────────────────
+
+  AuthService wraps Firebase Auth and Firestore user creation.
+  
+  Methods:
+    getUserRole()     — Checks vendors then students collection, returns role
+    signUpStudent()   — Creates Firebase Auth user + Firestore student doc
+    signUpVendor()    — Creates Firebase Auth user + Firestore vendor doc
+                        with auto-generated 6-digit vendor code
+    signIn()          — Firebase Auth email/password sign-in
+    signOut()         — Firebase Auth sign-out
+
+  Role Detection: Checks if email exists in 'vendors' first, then 'students'.
+  Vendor Code: Random 6-digit number generated via _generateVendorCode().
+
+
+── firestore_service.dart (30+ methods) ───────────────────────────────
+
+  The core data access layer. All Firestore reads/writes go through here.
+
+  Student/Vendor CRUD:
+    getStudent(), updateStudent(), getVendor(), updateVendor(), getVendorByCode()
+
+  Meal Management:
+    setMealDay()      — Write a day's meals to Firestore
+    getMealDay()      — Read a single day's meals
+    getMonthMeals()   — Read all days in a month
+
+  Billing:
+    setMonthBilling(), getMonthBilling()
+    recalculateMonthlyExpenditure() — Sums all daily meal costs for the month,
+                                      writes total to billing doc, returns total
+    clearMonthBilling()             — Resets monthly_exp=0, paid_status='paid'
+
+  Receipts:
+    addReceipt()        — Save to student's receipts subcollection
+    getReceipts()       — Read all student receipts
+    addVendorReceipt()  — Save to vendor's receipts subcollection
+    getVendorReceipts() — Read all vendor receipts
+
+  Comments (Mess Feed):
+    addComment(), commentsStream(), likeComment()
+
+  Requests:
+    sendRequest()       — Create unlock/parcel request in vendor's active_requests
+    requestsStream()    — Real-time stream of vendor's active requests
+
+  Student Search:
+    getStudentsByVendorCode() — All students linked to a vendor
+    searchStudents()          — Filter by email or hostel number
+
+  Headcounts:
+    getMealHeadcounts()  — Counts veg/non-veg/absent for each meal on a given day
+
+  Notifications:
+    notificationsStream()    — Real-time stream from student's notification subcollection
+    addStudentNotification() — Write notification to student (with push-style fields)
+
+  Pending Bills:
+    setPendingBill()         — Create/update pending bill on vendor side
+    deletePendingBill()      — Remove pending bill by student+month+type
+    pendingBillsStream()     — Real-time stream of vendor's pending bills
+    getPendingBillsForStudent() — Query pending bills for specific student
+
+
+── meal_logic.dart ────────────────────────────────────────────────────
+
+  Pure Dart logic — no Firebase dependency.
+
+  Enums: MealType (breakfast, lunch, dinner), MealState (absent, veg, nonVeg)
+
+  Key Methods:
+    isMealLocked()       — Determines if a meal can be changed
+                           Past days: always locked
+                           Today: locked during (start-60min) to (end+30min)
+                           Future: always unlocked
+
+    getTodayMealStatuses() — Returns lock status for all 3 meals
+
+    cycleMealState()     — Cycles: Absent(0) → Veg(1) → NonVeg(2) → Absent(0)
+
+    getMealCost()        — Per-meal cost lookup from MealSchedule constants
+    getDailyCost()       — Sum of 3 meals for one day
+
+
+── billing_logic.dart ─────────────────────────────────────────────────
+
+  Pure Dart logic for semester billing calculations.
+
+  BillingResult holds: monthlyExpense, planAllowance, overspend,
+                       bufferUsed, pendingBill, remainingBuffer
+
+  Key Methods:
+    getMonthlyAllowance() — Plan lookup: Plan1=₹2000, Plan2=₹2500, Plan3=₹3000
+    calculateMonthBilling() — Core formula:
+        overspend = max(0, monthlyExpense - planAllowance)
+        If overspend > 0:
+          If buffer >= overspend → buffer covers it
+          Else → partial buffer + remaining becomes pendingBill
+
+    getPlanLabel(), getAllPlans() — Display helpers
+
+
+── cloudinary_service.dart ────────────────────────────────────────────
+
+  Handles profile picture uploads to Cloudinary CDN.
+  Uses unsigned upload preset via HTTP POST to Cloudinary's upload API.
+  Returns the secure_url of the uploaded image.
+
+
+── receipt_pdf_service.dart ───────────────────────────────────────────
+
+  Generates styled PDF receipts on-demand (NOT stored in DB or cloud).
+  Uses the 'pdf' package to build a professional receipt with:
+    - Header with "MEZZ" branding
+    - Student and vendor details
+    - Itemized billing breakdown
+    - Unique 8-character receipt code
+    - Date and signature section
+  
+  Uses the 'printing' package to trigger system share/save dialog.
+
+
+================================================================================
+8. SCREENS & UI
+================================================================================
+
+── Splash Screen (splash_screen.dart) ─────────────────────────────────
+
+  Animated entry screen shown for ~2.8 seconds before navigating to AuthGate.
+  Features: gradient background, MEZZ logo (from assets), title with
+  letter-spacing, tagline, and loading spinner.
+  Uses staggered animations (fade + elastic scale).
+
+
+── Auth Screens ───────────────────────────────────────────────────────
+
+  login_screen.dart:
+    - MEZZ logo + "Welcome to Mezz" header
+    - Email/password fields with neumorphic card wrapper
+    - Role detection on sign-in → routes to /student or /vendor
+    - Link to sign-up
+
+  signup_screen.dart:
+    - Role toggle (Student / Vendor)
+    - Student: email, password, name, hostel number
+    - Vendor: email, password, name (vendor code auto-generated)
+
+
+── Student Shell (student_shell.dart) ─────────────────────────────────
+
+  Bottom navigation with 4 tabs:
+    1. Home (Dashboard)
+    2. Calendar
+    3. Notifications
+    4. Profile
+
+
+── Student Dashboard (student_dashboard.dart) ─────────────────────────
+
+  Sections:
+    1. Header — Avatar, greeting, vendor code
+    2. Stats Row — Monthly expenditure, meals today, current plan
+    3. Today's Meals — 3 MealCardWidgets with:
+       - Double-tap to cycle meal state
+       - Request button (unlock) when locked + absent
+       - Parcel button when veg/non-veg (locked or unlocked)
+       - Time-based blocking: no buttons after meal end + 30 min
+    4. Mess Feed — Comments stream with image support, likes
+
+  Key logic:
+    - _cycleMeal() → updates Firestore + recalculates expenditure + syncs
+      pending bill to vendor
+    - _isMealExpired() → checks if meal window + 30 min has passed
+    - _showRequestDialog() → unlock request with reason
+    - _showParcelDialog() → parcel request with recipient name
+
+
+── Student Calendar (student_calendar.dart) ────────────────────────────
+
+  Month-by-month view of all meals. Each day shows [B, L, D] as colored dots.
+  - Navigate months with left/right arrows
+  - Double-tap to change future meals
+  - Locked meals cannot be changed
+  - Updates trigger expenditure recalculation + pending bill sync
+
+
+── Student Notifications (student_notifications.dart) ──────────────────
+
+  Real-time stream from student's notification subcollection.
+  Each notification tile shows:
+    - Smart icon (parcel, lock, money, general)
+    - Read/unread indicator (colored dot)
+    - Relative timestamp ("2m ago", "3h ago")
+    - Tap to mark as read
+
+
+── Student Profile (student_profile.dart) ──────────────────────────────
+
+  Sections:
+    1. Profile card — Name, email, hostel, vendor code input, profile pic
+    2. Unpaid Semester Fee card (shown when billingStatus == 'pending'):
+       - ₹13,500 total, plan selection radio tiles
+       - "Submit Plan" button → saves plan to DB, notifies vendor
+    3. Receipts list — Past billing receipts with PDF download buttons
+
+  Profile editing:
+    - Update name, hostel, vendor code
+    - When vendor code changes → links to new vendor, sets initial
+      semester fee pending bill
+    - Profile pic upload via Cloudinary
+
+
+── Vendor Shell (vendor_shell.dart) ────────────────────────────────────
+
+  Bottom navigation with 4 tabs:
+    1. Dashboard
+    2. Billing
+    3. Requests (Notifications)
+    4. Settings
+
+
+── Vendor Dashboard (vendor_dashboard.dart) ────────────────────────────
+
+  Shows daily headcount breakdown:
+    - Breakfast: veg count, non-veg count, absent count
+    - Lunch: veg count, non-veg count, absent count
+    - Dinner: veg count, non-veg count, absent count
+  Date navigation to view different days.
+  Student list with search/filter capabilities.
+
+
+── Vendor Billing (vendor_billing.dart) ────────────────────────────────
+
+  Two types of content in the list:
+
+  1. Semester Fee Cards (red, at top):
+     - Shows unpaid semester fees from pending_bills collection
+     - "Mark as Paid" button → sets student billing_status='paid',
+       deletes pending bill, notifies student
+
+  2. Monthly Billing Cards:
+     - Current month: "In Progress" badge, NO clear button
+     - Past months (unpaid): "Pending" badge + "Clear Bill" button
+     - Clearing a bill:
+       a. Generates unique 8-char receipt code
+       b. Calculates billing via BillingLogic
+       c. Creates ReceiptModel → saves to student & vendor receipts
+       d. Clears student's month billing (monthly_exp=0, paid_status='paid')
+       e. Deletes monthly pending bill from vendor DB
+       f. Sends notification to student with receipt code
+       g. Offers PDF download in snackbar
+
+  3. "Issue New Semester Fee" button:
+     - Iterates all linked students
+     - For 'paid' students: sends notification, sets billing_status='pending'
+     - For 'pending' students: re-writes pending bill silently
+     - Creates semester_fee type pending bill for each student
+
+  Filter chips: All / Unpaid
+
+
+── Vendor Notifications (vendor_notifications.dart) ────────────────────
+
+  Real-time stream of active_requests from vendor's subcollection.
+  Each request shows:
+    - Student name, meal type, reason
+    - Type badge (Unlock / Parcel)
+    - Two action buttons:
+      • Approve — For unlock: sets meal to Veg, recalculates expenditure
+                  For parcel: marks as handled
+                  Sends notification to student
+      • Reject — Marks rejected, sends notification
+
+
+── Vendor Menu Editor (vendor_menu_editor.dart) ────────────────────────
+
+  Configure custom menu items and pricing.
+  Updates vendor's menu_config map in Firestore.
+
+
+── Vendor Settings (vendor_settings.dart) ──────────────────────────────
+
+  - Display vendor code (for students to link)
+  - Account information
+  - Sign out
+
+
+================================================================================
+9. WIDGETS
+================================================================================
+
+── meal_card_widget.dart ──────────────────────────────────────────────
+
+  Two modes:
+    compact = true  → 52×52 colored dot (used in calendar view)
+    compact = false → Full card with meal name, time, state, actions
+
+  Properties:
+    mealType    — breakfast/lunch/dinner
+    state       — 0=Absent (grey), 1=Veg (green), 2=Non-Veg (orange)
+    isLocked    — Shows lock icon, disables double-tap
+    onDoubleTap — Cycle meal state callback
+    onRequestTap — Unlock request callback (shown when locked + absent)
+    onParcelTap  — Parcel request callback (shown when veg/non-veg,
+                   regardless of lock state)
+
+  Buttons are hidden entirely when the callbacks are null (expired meals).
+
+
+── neumorphic_card.dart ───────────────────────────────────────────────
+
+  Wrapper widget providing the soft neumorphism card style:
+    - White background, rounded corners (24px)
+    - Dual shadow: light shadow up-left, dark shadow down-right
+
+
+── pill_button.dart ───────────────────────────────────────────────────
+
+  Rounded button with configurable:
+    - label, color, icon, isSmall, isLoading
+    - Gradient background from color
+    - Loading state shows CircularProgressIndicator
+
+
+── floating_bottom_nav.dart ───────────────────────────────────────────
+
+  Custom bottom navigation bar with:
+    - Floating design (not edge-to-edge)
+    - Neumorphic shadow
+    - Animated icon transitions
+
+
+================================================================================
+10. CONSTANTS & THEMING
+================================================================================
+
+── constants.dart ─────────────────────────────────────────────────────
+
+  AppColors:
+    primary = #6C63FF (purple)    accent = #FF6B6B (coral red)
+    vegGreen = #27AE60            nonVegOrange = #E67E22
+    absentGrey = #BDC3C7          danger = #E74C3C
+    warning = #F39C12             background = #F6F7FB
+
+  AppRadius:
+    card = 24, button = 16, pill = 50, input = 16, bottomNav = 28
+
+  MealSchedule:
+    Breakfast  08:00 - 09:00   Price: ₹50 (veg/non-veg same)
+    Lunch      13:00 - 14:00   Veg: ₹70, Non-Veg: ₹80
+    Dinner     20:00 - 21:00   Veg: ₹70, Non-Veg: ₹80
+    Lock before: 60 min        Lock after: 30 min
+
+  BillingConstants:
+    baseFee = ₹13,500 (includes security deposit)
+    securityDeposit = ₹1,500
+    Plans:
+      Plan 1 → ₹2,000/month × 6 months = ₹12,000
+      Plan 2 → ₹2,500/month × 5 months = ₹12,500
+      Plan 3 → ₹3,000/month × 4 months = ₹12,000
+
+
+── theme.dart ─────────────────────────────────────────────────────────
+
+  Material ThemeData with custom input decoration, card theme, app bar theme.
+  Google Fonts: Poppins for titles, Manrope for body text.
+
+
+================================================================================
+11. FEATURE: MEAL SCHEDULING & LOCKING
+================================================================================
+
+  MEAL STATE MACHINE:
+  ┌─────────┐  double-tap  ┌─────────┐  double-tap  ┌──────────┐
+  │ Absent  │ ──────────► │  Veg    │ ──────────► │ Non-Veg  │
+  │  (0)    │              │  (1)    │              │  (2)     │
+  └─────────┘              └─────────┘              └──────────┘
+       ▲                                                  │
+       └──────────────── double-tap ──────────────────────┘
+
+  LOCK WINDOW (per meal):
+  
+  Example for Lunch (13:00 - 14:00):
+  
+       12:00          13:00          14:00      14:30
+         │              │              │          │
+    ─────┼──────────────┼──────────────┼──────────┼──────
+         │◄── LOCKED ──►│◄── MEAL ────►│◄ LOCKED ►│
+         │              │              │          │
+    lockStart     mealStart       mealEnd    lockEnd
+    (start-60min)                            (end+30min)
+
+  Past days: ALWAYS locked (no changes allowed)
+  Future days: ALWAYS unlocked (can change freely)
+  Today: Locked during the lock window
+
+  AFTER lockEnd (meal end + 30 min):
+    - No Request or Parcel buttons shown
+    - Meal card is read-only
+
+
+================================================================================
+12. FEATURE: BILLING & PLANS
+================================================================================
+
+  BILLING FLOW:
+
+  ┌──────────────────────────────────────────────────────────┐
+  │              DAILY MEAL TRACKING                          │
+  │                                                          │
+  │  Student marks meals → getMealCost() per meal → sum      │
+  │  Written to: meals/{month}/days/{day}                    │
+  │                                                          │
+  │  After each change: recalculateMonthlyExpenditure()      │
+  │  Sums all days → updates billing/{month}.monthly_exp     │
+  │  Also syncs to vendor's pending_bills                    │
+  └──────────────────────────┬───────────────────────────────┘
+                             │
+                             ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │              MONTH-END BILLING (Vendor clears bill)      │
+  │                                                          │
+  │  calculateMonthBilling(expense, planId, buffer)          │
+  │                                                          │
+  │  planAllowance = Plan amount (₹2000/₹2500/₹3000)        │
+  │  overspend = max(0, expense - planAllowance)             │
+  │                                                          │
+  │  If overspend > 0:                                       │
+  │    If buffer ≥ overspend → buffer absorbs                │
+  │    Else → buffer used up, rest = pendingBill             │
+  │                                                          │
+  │  Receipt generated with unique 8-char code               │
+  │  Student notified, billing cleared                       │
+  └──────────────────────────────────────────────────────────┘
+
+  EXAMPLE:
+    Student on Plan 1 (₹2,000/mo), monthly expense = ₹2,800
+    Buffer remaining = ₹500
+
+    overspend = ₹2,800 - ₹2,000 = ₹800
+    buffer covers ₹500, pending bill = ₹300
+    remainingBuffer = ₹0
+
+
+================================================================================
+13. FEATURE: SEMESTER FEE FLOW
+================================================================================
+
+  ┌──────────┐                                    ┌──────────┐
+  │  VENDOR  │                                    │ STUDENT  │
+  └────┬─────┘                                    └────┬─────┘
+       │                                               │
+       │  1. Issue Semester Fee                        │
+       │  (vendor_billing.dart)                        │
+       │     For each student:                         │
+       │     - Check billingStatus                     │
+       │     - Set to 'pending'                        │
+       │     - Create semester_fee pending bill         │
+       │     - Notify if was 'paid'                    │
+       │                                               │
+       │  ─────── Notification ──────────────────────► │
+       │                                               │
+       │                                               │  2. Select Plan
+       │                                               │  (student_profile.dart)
+       │                                               │     - Choose Plan 1/2/3
+       │                                               │     - Save selected_plan
+       │                                               │     - Notify vendor
+       │                                               │
+       │  ◄──────── Notification ───────────────────── │
+       │                                               │
+       │  3. Mark as Paid                              │
+       │  (vendor_billing.dart)                        │
+       │     - Set student billing_status='paid'       │
+       │     - Delete semester_fee pending bill         │
+       │     - Notify student                          │
+       │                                               │
+       │  ─────── Notification ──────────────────────► │
+       │                                               │
+       ▼                                               ▼
+
+  SEMESTER FEE: ₹13,500 (includes security deposit)
+  This is a one-time fee per semester.
+  The selected plan determines monthly deductions going forward.
+
+
+================================================================================
+14. FEATURE: RECEIPTS & PDF GENERATION
+================================================================================
+
+  When a bill is cleared by the vendor:
+    1. Unique 8-char code generated (e.g., "A3K9X2MF")
+    2. ReceiptModel created with all billing details
+    3. Saved to BOTH student's and vendor's receipts subcollections
+    4. Student is notified with the receipt code
+
+  PDF Generation (on-demand, NOT stored):
+    - Generated dynamically from ReceiptModel data when user taps "Download"
+    - Uses the 'pdf' Dart package to build the document
+    - Uses the 'printing' package to show native share/save dialog
+    - Contains: header, student info, billing breakdown, receipt code, date
+
+
+================================================================================
+15. FEATURE: NOTIFICATIONS
+================================================================================
+
+  STUDENT NOTIFICATIONS:
+    Stored at: students/{email}/vendor_data/{code}/notifications/{id}
+    Fields: message, timestamp, read (bool)
+    
+    Sources:
+      - Vendor approves/rejects unlock request
+      - Vendor approves/rejects parcel request
+      - Vendor clears a monthly bill (includes receipt code)
+      - Vendor issues semester fee
+      - Vendor marks semester fee as paid
+
+  VENDOR NOTIFICATIONS:
+    Stored as: vendors/{email}/active_requests/{id}
+    These are actually action-required items, not passive notifications.
+    
+    Sources:
+      - Student sends unlock request
+      - Student sends parcel request
+      - Student submits plan selection (via student notification back to vendor)
+
+
+================================================================================
+16. FEATURE: REQUESTS (UNLOCK & PARCEL)
+================================================================================
+
+  UNLOCK REQUEST:
+    Trigger: Student taps "Request" on a locked meal that is in Absent (0) state
+    Contains: student email, meal label, reason, type='unlock'
+    Vendor action:
+      - Approve: Sets the meal to Veg (1) in student's Firestore data,
+                 recalculates expenditure, sends notification
+      - Reject: Sends rejection notification
+
+  PARCEL REQUEST:
+    Trigger: Student taps "Parcel" on a meal in Veg (1) or Non-Veg (2) state
+    Contains: student email, meal label, reason, recipient name, type='parcel'
+    Vendor action:
+      - Approve: Marks as handled, sends notification to student
+      - Reject: Sends rejection notification
+
+  TIME BLOCKING:
+    Both request types are blocked after meal end time + 30 minutes.
+    The button simply disappears from the UI after this cutoff.
+
+
+================================================================================
+17. FEATURE: COMMENTS FEED
+================================================================================
+
+  A community feed visible to all students linked to the same vendor.
+  
+  Stored at: vendor_feeds/{vendor_code}/comments/{id}
+  
+  Features:
+    - Text comments with optional image attachments (via Cloudinary)
+    - Like system (increment-only counter)
+    - Real-time updates via StreamBuilder
+    - Relative timestamps ("2m ago", "3h ago")
+    - Author avatar with initials
+
+
+================================================================================
+18. AUTHENTICATION FLOW
+================================================================================
+
+  ┌──────────┐    ┌────────────┐    ┌────────────┐    ┌──────────────┐
+  │  Splash  │──►│  AuthGate  │──►│ RoleRouter │──►│ Student/Vendor│
+  │  Screen  │    │            │    │            │    │    Shell      │
+  │ (2.8 sec)│    │ StreamBldr │    │ getUserRole│    │              │
+  └──────────┘    │ authState  │    │            │    └──────────────┘
+                  │ Changes    │    │ vendor →   │
+                  │            │    │  /vendor   │
+                  │ null →     │    │ student →  │
+                  │  Login     │    │  /student  │
+                  │ user →     │    │ null →     │
+                  │  RoleRouter│    │  signOut   │
+                  └────────────┘    └────────────┘
+
+  Sign Up:
+    - User chooses "Student" or "Vendor" role
+    - Firebase Auth creates account
+    - Firestore document created in appropriate collection
+    - Vendor gets auto-generated 6-digit code
+
+  Sign In:
+    - Firebase Auth validates credentials
+    - getUserRole() checks vendors then students collection
+    - Routes to appropriate shell
+
+
+================================================================================
+19. APP STARTUP FLOW
+================================================================================
+
+  1. main() → Flutter binding init → Firebase.initializeApp()
+  2. MezzApp created with MaterialApp
+  3. home = SplashScreen(nextScreen: AuthGate())
+  4. SplashScreen plays 2.8s animation → fades to AuthGate
+  5. AuthGate listens to Firebase Auth state changes:
+     - No user → LoginScreen
+     - User exists → RoleRouter
+  6. RoleRouter checks Firestore for user role:
+     - 'vendor' → VendorShell (bottom nav with 4 tabs)
+     - 'student' → StudentShell (bottom nav with 4 tabs)
+     - null → signs out, back to LoginScreen
+
+  Named Routes:
+    /login   → LoginScreen
+    /signup  → SignupScreen
+    /student → StudentShell
+    /vendor  → VendorShell
+
+
+================================================================================
+20. KEY BUSINESS RULES
+================================================================================
+
+  1. Meal changes are only allowed for future days, or today if the meal
+     is outside its lock window (1 hour before to 30 min after).
+
+  2. Student meal state cycles: Absent → Veg → Non-Veg → Absent.
+     Double-tap to change.
+
+  3. Every meal change triggers recalculateMonthlyExpenditure() which
+     sums ALL meal costs for the month and syncs to vendor's pending bills.
+
+  4. Semester fee is ₹13,500 total (security deposit included).
+     Vendor issues it, student picks a plan, vendor confirms payment.
+
+  5. Plans only affect the monthly deduction allowance:
+     Plan 1: ₹2,000/mo    Plan 2: ₹2,500/mo    Plan 3: ₹3,000/mo
+
+  6. If monthly expense exceeds plan allowance, the overspend is first
+     covered by the security deposit buffer, then becomes a pending bill.
+
+  7. Vendors can only clear bills for PAST months (not the current month).
+
+  8. Each cleared bill generates a unique 8-character receipt code shared
+     with both student and vendor.
+
+  9. PDFs are generated on-demand from receipt data — never stored.
+
+  10. Request/parcel buttons disappear after meal end time + 30 minutes.
+
+  11. When a student first links a vendor code, a semester fee pending bill
+      is automatically created.
+
+
+================================================================================
+21. HOW TO MODIFY COMMON THINGS
+================================================================================
+
+  CHANGE MEAL PRICES:
+    Edit: lib/constants/constants.dart → MealSchedule class
+    Fields: breakfastPrice, lunchVegPrice, lunchNonVegPrice, etc.
+
+  CHANGE MEAL TIMES:
+    Edit: lib/constants/constants.dart → MealSchedule class
+    Fields: breakfastStart/End, lunchStart/End, dinnerStart/End (24-hour)
+
+  CHANGE LOCK WINDOW:
+    Edit: lib/constants/constants.dart → MealSchedule class
+    Fields: lockBeforeMinutes (default: 60), lockAfterMinutes (default: 30)
+
+  CHANGE BILLING PLANS:
+    Edit: lib/constants/constants.dart → BillingConstants.plans
+    Each plan has: amount (monthly ₹), months (duration), label (display)
+
+  CHANGE SEMESTER FEE:
+    Edit: lib/constants/constants.dart → BillingConstants.baseFee
+    Currently ₹13,500 (includes security deposit)
+
+  CHANGE APP COLORS:
+    Edit: lib/constants/constants.dart → AppColors class
+    Primary brand: primary (#6C63FF), primaryDark (#4A42E8)
+
+  CHANGE APP LOGO:
+    Replace: assets/images/mezz_logo.png
+    Run: dart run flutter_launcher_icons
+    (Also update pubspec.yaml adaptive_icon_background color if needed)
+
+  ADD A NEW FIRESTORE FIELD:
+    1. Add field to relevant model in lib/models/
+    2. Update fromMap() and toMap() in the model
+    3. Update relevant methods in firestore_service.dart
+    4. Update UI screens that display/edit the field
+
+  ADD A NEW SCREEN:
+    1. Create file in lib/screens/{portal}/
+    2. Add tab in the shell file (student_shell.dart or vendor_shell.dart)
+    3. Add navigation item in floating_bottom_nav.dart
+
+  CHANGE CLOUDINARY CONFIG:
+    Edit: lib/services/cloudinary_service.dart
+    Fields: cloudName, uploadPreset
+
+
+================================================================================
+                              END OF DOCUMENTATION
+================================================================================

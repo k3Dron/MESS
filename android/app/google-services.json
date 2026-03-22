@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "306531011914",
+    "project_id": "mezz-3c847",
+    "storage_bucket": "mezz-3c847.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:306531011914:android:fb35d4cbf73e28968c05b3",
+        "android_client_info": {
+          "package_name": "com.mezz.mezz"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKEx9_YgQr2MdkBngChNgt3SDW0lGzJlk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
